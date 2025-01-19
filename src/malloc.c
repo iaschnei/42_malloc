@@ -9,3 +9,11 @@ void  *malloc(size_t size) {
 
   return (allocated_space);
 }
+
+#include<stdio.h>
+#include<unistd.h>
+
+int main() {
+
+  printf("%ldl\n", sysconf(_SC_PAGESIZE));
+}
