@@ -11,8 +11,8 @@
 
 # define SMALL  64
 # define MEDIUM 4096
-# define TINY_AREA_SIZE   (sysconf(_SC_PAGESIZE) * 5) // 64 * 100 + 64 * 200 (headers and footers)
-# define SMALL_AREA_SIZE  (sysconf(_SC_PAGESIZE) * 105) // 4096 * 100 + 64 * 200
+# define SMALL_AREA_SIZE   (sysconf(_SC_PAGESIZE) * 5) // 64 * 100 + 64 * 200 (headers and footers)
+# define MEDIUM_AREA_SIZE  (sysconf(_SC_PAGESIZE) * 105) // 4096 * 100 + 64 * 200
 
 
 typedef struct s_area {

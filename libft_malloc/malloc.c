@@ -3,8 +3,8 @@
 #include <stdint.h>
 #include <sys/mman.h>
 
-static void     *tiny_alloc(size_t size);
 static void     *small_alloc(size_t size);
+static void     *medium_alloc(size_t size);
 static void     *large_alloc(size_t size);
 static t_area   init_area(size_t size);
 
@@ -17,10 +17,10 @@ void  *malloc(size_t size) {
   size = ALIGN(size);   // Align size to 8 bytes
 
   if (size <= SMALL) {
-    allocated_space = tiny_alloc(size);
+    allocated_space = small_alloc(size);
   }
   else if (size > SMALL && size <= MEDIUM) {
-    allocated_space = small_alloc(size);
+    allocated_space = medium_alloc(size);
   }
   else {
     allocated_space = large_alloc(size);
@@ -29,23 +29,17 @@ void  *malloc(size_t size) {
   return (allocated_space);
 }
 
-static void *tiny_alloc(size_t size) {
 
-  // Check if there is already a tiny area allocated
-  // -> YES:
-  //        Check if there is an available slot
-  //        -> YES:
-  //                Allocate the space for that alloc
-  //        -> NO:
-  //                Go back and allocate a new area
-  // -> NO:
-  //        Allocate a new area
-  //
-  //  Same logic for small_alloc
-  
+static void *small_alloc(size_t size) {
+
   if (areas_manager.small_areas == NULL) {
+    areas_manager.small_areas = mmap(NULL, sizeof(t_area), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (areas_manager.small_areas == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25); 
+      return (NULL);
+    }
     areas_manager.small_areas[0] = init_area(SMALL_AREA_SIZE);
-    if ((int64_t) areas_manager.small_areas[0].memory < 0) {
+    if (areas_manager.small_areas[0].memory == NULL) {
       write(2, "Fatal error: mmap failed\n", 25); 
       return (NULL);
     }
@@ -53,50 +47,118 @@ static void *tiny_alloc(size_t size) {
     return (malloc(size));
   }
   
-
-  // Iterate over all areas to find the last one not full or just the last one full
-  int i = 0;
+  // Iterate over all areas to find one with enough space (max 100 blocks)
+  size_t i = 0;
   while (i < areas_manager.num_small_areas) {
-    if (areas_manager.small_areas[i].num_blocks < 100) {
+    if (areas_manager.small_areas[i].num_blocks < 100 
+       && areas_manager.small_areas[i].available_size >= size + HEADER_SIZE + FOOTER_SIZE) {
       break;
     }
     i++;
   }
-  // If the last one is full too or if there isn't enough space anyway, we need to init another one
-  if (areas_manager.small_areas[i].num_blocks >= 100 
-      || areas_manager.small_areas[i].available_size < HEADER_SIZE + size + FOOTER_SIZE)
-  {
-    // FIXME : Can i do that ?
-    areas_manager.small_areas[i + 1] = init_area(SMALL_AREA_SIZE);
-    if ((int64_t) areas_manager.small_areas[0].memory < 0) {
+  // If we reached the end with no sucess 
+  if (i == areas_manager.num_small_areas)  {
+    
+    areas_manager.small_areas = realloc(areas_manager.small_areas, sizeof(t_area) * areas_manager.num_small_areas + 1);
+    if (areas_manager.small_areas == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25);
+      return (NULL);
+    }
+    areas_manager.small_areas[i] = init_area(SMALL_AREA_SIZE);
+    if (areas_manager.small_areas[i].memory == NULL) {
       write(2, "Fatal error: mmap failed\n", 25); 
       return (NULL);
     }
-    areas_manager.num_small_areas = 1;
+    areas_manager.num_small_areas += 1;
     return (malloc(size));
   }
 
   size_t *cursor = areas_manager.small_areas[i].memory;
 
-  while (*cursor != 0) { // && area is not free 
-    cursor += *cursor;   // if the header does contain the size
+  while (*cursor != 0 && !(*cursor & 1)) { 
+    cursor += *cursor >> 1; // Move to the next block, ignore lower bit
   }
 
-  // calculate block size with header + size (data) + footer
-  // put that block size in header and footer for next / prev
-  // if it is the first block, footer must be at 0 or smthg to stop
-  // footer is used for free coalesce
-  // increase area's block count, reduce available space
-  // return the data segment of the block
+  // Calculate total block size
+  size_t block_size = ALIGN(HEADER_SIZE + size + FOOTER_SIZE);
+  size_t *header = cursor;
+  *header = block_size | 1; // Save the size and mark the block as allocated
+  size_t *footer = cursor + (block_size >> 1) - 1;
+  *footer = *header; 
 
-  return (NULL);
+  areas_manager.small_areas[i].num_blocks += 1;
+  areas_manager.small_areas[i].available_size -= block_size;
+
+  return (void *)(cursor + HEADER_SIZE);
 }
 
-static void *small_alloc(size_t size) {
-  return (NULL);
+
+static void *medium_alloc(size_t size) {
+
+  if (areas_manager.medium_areas == NULL) {
+    areas_manager.medium_areas = mmap(NULL, sizeof(t_area), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (areas_manager.medium_areas == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25); 
+      return (NULL);
+    }
+    areas_manager.medium_areas[0] = init_area(MEDIUM_AREA_SIZE);
+    if (areas_manager.medium_areas[0].memory == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25); 
+      return (NULL);
+    }
+    areas_manager.num_medium_areas = 1;
+    return (malloc(size));
+  }
+  
+  // Iterate over all areas to find one with enough space (max 100 blocks)
+  size_t i = 0;
+  while (i < areas_manager.num_medium_areas) {
+    if (areas_manager.medium_areas[i].num_blocks < 100 
+       && areas_manager.medium_areas[i].available_size >= size + HEADER_SIZE + FOOTER_SIZE) {
+      break;
+    }
+    i++;
+  }
+  // If we reached the end with no sucess 
+  if (i == areas_manager.num_medium_areas)  {
+    
+    areas_manager.medium_areas = realloc(areas_manager.medium_areas, sizeof(t_area) * areas_manager.num_medium_areas + 1);
+    if (areas_manager.medium_areas == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25);
+      return (NULL);
+    }
+    areas_manager.medium_areas[i] = init_area(MEDIUM_AREA_SIZE);
+    if (areas_manager.medium_areas[i].memory == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25); 
+      return (NULL);
+    }
+    areas_manager.num_medium_areas += 1;
+    return (malloc(size));
+  }
+
+  size_t *cursor = areas_manager.medium_areas[i].memory;
+
+  while (*cursor != 0 && !(*cursor & 1)) { 
+    cursor += *cursor >> 1; // Move to the next block, ignore lower bit
+  }
+
+  // Calculate total block size
+  size_t block_size = ALIGN(HEADER_SIZE + size + FOOTER_SIZE);
+  size_t *header = cursor;
+  *header = block_size | 1; // Save the size and mark the block as allocated
+  size_t *footer = cursor + (block_size >> 1) - 1;
+  *footer = *header; 
+
+  areas_manager.medium_areas[i].num_blocks += 1;
+  areas_manager.medium_areas[i].available_size -= block_size;
+
+  return (void *)(cursor + HEADER_SIZE);
 }
 
 static void *large_alloc(size_t size) {
+  size += 1;
+  if (size > 0)
+    return (NULL);
   return (NULL);
 }
 

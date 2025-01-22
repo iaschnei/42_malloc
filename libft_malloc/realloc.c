@@ -3,5 +3,9 @@
 
 
 void  *realloc(void *ptr, size_t size) {
-  return (NULL);
+  
+  if (size > 0)
+    return (NULL);
+
+  return (ptr);
 }
