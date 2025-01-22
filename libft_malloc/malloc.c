@@ -156,10 +156,35 @@ static void *medium_alloc(size_t size) {
 }
 
 static void *large_alloc(size_t size) {
-  size += 1;
-  if (size > 0)
-    return (NULL);
-  return (NULL);
+
+  if (areas_manager.large_areas == NULL) {
+    areas_manager.large_areas = mmap(NULL, sizeof(t_area), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (areas_manager.large_areas == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25);
+      return (NULL);
+    }
+    areas_manager.large_areas[0] = init_area(size);
+    if (areas_manager.large_areas[0].memory == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25);
+      return (NULL);
+    }
+    areas_manager.num_large_areas = 1;
+  }
+  else {
+    areas_manager.large_areas = realloc(areas_manager.large_areas, sizeof(t_area) * areas_manager.num_large_areas + 1);
+    if (areas_manager.large_areas == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25);
+      return (NULL);
+    }
+    areas_manager.large_areas[areas_manager.num_large_areas] = init_area(size);
+    if (areas_manager.large_areas[areas_manager.num_large_areas].memory == NULL) {
+      write(2, "Fatal error: mmap failed\n", 25);
+      return (NULL);
+    }
+    areas_manager.num_large_areas += 1;
+  }
+  
+  return (areas_manager.large_areas[areas_manager.num_large_areas - 1].memory);
 }
 
 static t_area init_area(size_t size) {
